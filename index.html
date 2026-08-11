@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Breath Comet</title>
+
+<style>
+:root{
+    --bg:#000;
+    --fg:#fff;
+}
+
+*{
+    box-sizing:border-box;
+    margin:0;
+    padding:0;
+}
+
+body{
+    background:var(--bg);
+    color:var(--fg);
+    overflow:hidden;
+    font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    user-select:none;
+}
+
+#grid{
+    position:fixed;
+    inset:0;
+    background:
+        linear-gradient(rgba(255,255,255,0.12) 2px, transparent 2px),
+        linear-gradient(90deg, rgba(255,255,255,0.12) 2px, transparent 2px);
+    background-size:40px 40px;
+    pointer-events:none;
+}
+
+#title{
+    position:fixed;
+    top:16px;
+    left:20px;
+    font-size:14px;
+    opacity:.75;
+    letter-spacing:.08em;
+}
+
+#phase{
+    position:fixed;
+    top:14px;
+    left:50%;
+    transform:translateX(-50%);
+    font-size:22px;
+    font-weight:300;
+    letter-spacing:.12em;
+    color:#fff;
+}
+
+.phasePulse{
+    animation:pulse .6s ease;
+}
+
+@keyframes pulse{
+    0%{
+        transform:translateX(-50%) scale(1);
+        font-weight:300;
+    }
+    50%{
+        transform:translateX(-50%) scale(1.25);
+        font-weight:700;
+    }
+    100%{
+        transform:translateX(-50%) scale(1);
+        font-weight:300;
+    }
+}
+
+#playPause{
+    position:fixed;
+    top:12px;
+    right:20px;
+    background:#000;
+    color:#fff;
+    border:1px solid #fff;
+    padding:8px 14px;
+    cursor:pointer;
+    border-radius:4px;
+    transition:background-color 0.15s ease;
+}
+
+#playPause:hover{
+    background:#222;
+}
+
+canvas{
+    display:block;
+}
+
+#controls{
+    position:fixed;
+    bottom:20px;
+    left:50%;
+    transform:translateX(-50%);
+    width:min(250px,45vw);
+    text-align:center;
+}
+
+#slider{
+    width:100%;
+    cursor:pointer;
+}
+
+#ticks{
+    display:flex;
+    justify-content:space-between;
+    margin-top:6px;
+    font-size:12px;
+    opacity:.75;
+}
+
+#sliderLabel{
+    margin-top:8px;
+    font-size:14px;
+    opacity:.8;
+}
+</style>
+</head>
+
+<body>
+
+<div id="grid"></div>
+
+<div id="title">Breath Comet</div>
+<div id="phase">INHALE</div>
+
+<button id="playPause">Pause</button>
+
+<canvas id="canvas"></canvas>
+
+<div id="controls">
+    <input
+        id="slider"
+        type="range"
+        min="3"
+        max="10"
+        step="1"
+        value="5">
+
+    <div id="ticks">
+        <span>3</span>
+        <span>4</span>
+        <span>5</span>
+        <span>6</span>
+        <span>7</span>
+        <span>8</span>
+        <span>9</span>
+        <span>10</span>
+    </div>
+
+    <div id="sliderLabel">
+        Respiratory amplitude: 5 s
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const slider = document.getElementById("slider");
+const sliderLabel = document.getElementById("sliderLabel");
+const phaseText = document.getElementById("phase");
+const playPauseBtn = document.getElementById("playPause");
+
+let paused = false;
+let pauseStarted = 0;
+
+let w, h, centerX, centerY;
+
+const COMET_RADIUS = 10;
+const TAIL_WIDTH = 10;
+const SPEED_PX_PER_SEC = 100;
+
+let trace = [];
+
+function resize(){
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+
+    centerX = w * 0.5;
+    centerY = h * 0.5;
+}
+
+resize();
+window.addEventListener("resize", resize, { passive: true });
+
+slider.addEventListener("input", () => {
+    sliderLabel.textContent = `Respiratory amplitude: ${slider.value} s`;
+}, { passive: true });
+
+playPauseBtn.addEventListener("click", () => {
+    paused = !paused;
+
+    if(paused){
+        pauseStarted = performance.now();
+        playPauseBtn.textContent = "Play";
+    }else{
+        const delta = performance.now() - pauseStarted;
+        phase.startTime += delta;
+
+        for(let i = 0; i < trace.length; i++){
+            trace[i].time += delta;
+        }
+
+        playPauseBtn.textContent = "Pause";
+    }
+});
+
+function easeInOut(t){
+    return 0.5 - 0.5 * Math.cos(Math.PI * t);
+}
+
+function phaseDuration(){
+    return Number(slider.value) * 1000;
+}
+
+function getAmplitude(){
+    return h * 0.25;
+}
+
+function pulsePhaseText(){
+    phaseText.classList.remove("phasePulse");
+    void phaseText.offsetWidth;
+    phaseText.classList.add("phasePulse");
+}
+
+let currentY = centerY;
+
+let phase = {
+    startY: centerY,
+    endY: centerY - getAmplitude(),
+    startTime: performance.now(),
+    duration: phaseDuration(),
+    inhale: true
+};
+
+function beginNextPhase(now){
+    currentY = phase.endY;
+    const inhale = !phase.inhale;
+    const amp = getAmplitude();
+
+    if(inhale){
+        phaseText.textContent = "INHALE";
+    }else{
+        phaseText.textContent = "EXHALE";
+    }
+
+    pulsePhaseText();
+
+    phase = {
+        startY: currentY,
+        endY: inhale ? centerY - amp : centerY + amp,
+        startTime: now,
+        duration: phaseDuration(),
+        inhale
+    };
+}
+
+function animate(now){
+    if(paused){
+        requestAnimationFrame(animate);
+        return;
+    }
+
+    const elapsed = now - phase.startTime;
+
+    if(elapsed >= phase.duration){
+        beginNextPhase(now);
+    }
+
+    const t = Math.min((now - phase.startTime) / phase.duration, 1);
+    const smooth = easeInOut(t);
+
+    currentY = phase.startY + (phase.endY - phase.startY) * smooth;
+
+    trace.push({
+        y: currentY,
+        time: now
+    });
+
+    const maxAgeMs = (centerX / SPEED_PX_PER_SEC) * 1000;
+    while(trace.length > 0 && (now - trace[0].time) > maxAgeMs){
+        trace.shift();
+    }
+
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = TAIL_WIDTH;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    if(trace.length > 1){
+        ctx.beginPath();
+        for(let i = 0; i < trace.length; i++){
+            const timeDeltaSec = (now - trace[i].time) / 1000;
+            const x = centerX - (timeDeltaSec * SPEED_PX_PER_SEC);
+            const y = trace[i].y;
+
+            if(i === 0){
+                ctx.moveTo(x, y);
+            }else{
+                ctx.lineTo(x, y);
+            }
+        }
+        ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.fillStyle = "#fff";
+    ctx.arc(
+        centerX,
+        currentY,
+        COMET_RADIUS,
+        0,
+        Math.PI * 2
+    );
+    ctx.fill();
+
+    requestAnimationFrame(animate);
+}
+
+pulsePhaseText();
+requestAnimationFrame(animate);
+</script>
+
+</body>
+</html>
